@@ -86,15 +86,19 @@ async def verify(ctx):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def post(ctx, channel: discord.TextChannel, *, content):
+
     parts = [part.strip() for part in content.split("|")]
 
-    title = parts[0] if len(parts) > 0 and parts[0] else None
-    message = parts[1] if len(parts) > 1 and parts[1] else None
-    image_url = parts[2] if len(parts) > 2 and parts[2] else None
-
-    if not title or not message:
-        await ctx.send("Use this format:\n`!post #channel title | message | image_link`\nOr attach an image.")
+    # REQUIRED
+    if len(parts) < 2:
+        await ctx.send("Use this format:\n`!post #channel title | message`\n(Optional: add `| image_link` or attach an image)")
         return
+
+    title = parts[0]
+    message = parts[1]
+
+    # OPTIONAL image
+    image_url = parts[2] if len(parts) >= 3 else None
 
     embed = discord.Embed(
         title=title,
@@ -104,16 +108,15 @@ async def post(ctx, channel: discord.TextChannel, *, content):
 
     embed.set_footer(text="Ebay Warehouse")
 
-    # Priority 1: attached image
+    # 🔥 1. Check attachment first
     if ctx.message.attachments:
         attachment = ctx.message.attachments[0]
         if attachment.content_type and attachment.content_type.startswith("image/"):
             embed.set_image(url=attachment.url)
 
-    # Priority 2: image link
+    # 🔥 2. Check link (optional)
     elif image_url:
-        valid_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
-        if image_url.startswith("http") and any(image_url.lower().endswith(ext) for ext in valid_extensions):
+        if image_url.startswith("http"):
             embed.set_image(url=image_url)
 
     await channel.send(embed=embed)
