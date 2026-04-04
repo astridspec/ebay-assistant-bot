@@ -93,7 +93,7 @@ async def post(ctx, channel: discord.TextChannel, *, content):
     image_url = parts[2] if len(parts) > 2 and parts[2] else None
 
     if not title or not message:
-        await ctx.send("Use this format:\n`!post #channel title | message | image_link`")
+        await ctx.send("Use this format:\n`!post #channel title | message | image_link`\nOr attach an image.")
         return
 
     embed = discord.Embed(
@@ -102,23 +102,26 @@ async def post(ctx, channel: discord.TextChannel, *, content):
         color=discord.Color.blue()
     )
 
-    if ctx.author.avatar:
-        embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar.url)
-    else:
-        embed.set_author(name=ctx.author.display_name)
-
     embed.set_footer(text="Ebay Warehouse")
 
-    if image_url:
+    # Priority 1: attached image
+    if ctx.message.attachments:
+        attachment = ctx.message.attachments[0]
+        if attachment.content_type and attachment.content_type.startswith("image/"):
+            embed.set_image(url=attachment.url)
+
+    # Priority 2: image link
+    elif image_url:
         valid_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
         if image_url.startswith("http") and any(image_url.lower().endswith(ext) for ext in valid_extensions):
             embed.set_image(url=image_url)
-        else:
-            await ctx.send("That image link doesn't look valid. Use a direct image URL ending in .png, .jpg, .jpeg, .gif, or .webp")
-            return
 
     await channel.send(embed=embed)
-    await ctx.message.delete()
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 
 import discord
