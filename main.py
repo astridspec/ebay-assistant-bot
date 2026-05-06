@@ -18,8 +18,10 @@ access_role = "Verified"
 
 @bot.event
 async def on_ready():
-    print(f"Im ready to assist!, {bot.user.name}!")
 
+# welcome chat
+
+    print(f"Im ready to assist!, {bot.user.name}!")
 @bot.event
 async def on_member_join(member):
     print(f"{member} joined the server")  # debug check
@@ -126,155 +128,591 @@ async def post(ctx, channel: discord.TextChannel, *, content):
     except:
         pass
 
-
-import discord
-from discord.ext import commands
-from datetime import datetime, timezone
-
-PING_CHANNEL_ID = 1488409847798956103
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def listing(
-    ctx,
-    channel: discord.TextChannel = None,
-    number: int = None,
-    user: discord.Member = None
-):
-    if channel is None or number is None or user is None:
-        await ctx.send("Use this format: `!listing #channel 38 @user`")
-        return
-
-    # Use UTC and let Discord convert it for each viewer
-    now = datetime.now(timezone.utc)
-    unix_timestamp = int(now.timestamp())
-
-    embed = discord.Embed(
-        title="Listing Status",
-        color=discord.Color.blue()
-    )
-
-    embed.add_field(name="Date & Time", value=f"<t:{unix_timestamp}:F>", inline=False)
-    embed.add_field(name="No. of Listing", value=str(number), inline=False)
-
-    try:
-        sent_message = await channel.send(embed=embed)
-        await sent_message.add_reaction("⏳")
-        await sent_message.add_reaction("💸")
-    except Exception as e:
-        await ctx.send(f"⚠️ Failed to post listing in {channel.mention}: {e}")
-        return
-
-    ping_channel = bot.get_channel(PING_CHANNEL_ID)
-    if ping_channel is None:
-        try:
-            ping_channel = await bot.fetch_channel(PING_CHANNEL_ID)
-        except Exception as e:
-            await ctx.send(f"⚠️ Ping channel not found or inaccessible: {e}")
-            return
-
-    try:
-        await ping_channel.send(
-            f"📦 **New Listing Products for you!**\n"
-            f"👤 Staff: {user.mention}\n"
-            f"📊 Listings: {number}\n"
-            f"📅 Created: <t:{unix_timestamp}:F>"
-        )
-    except Exception as e:
-        await ctx.send(f"⚠️ Failed to send ping message: {e}")
-        return
-
-    await ctx.send(f"✅ Listing posted in {channel.mention}")
-
-
-
-import discord
-from discord.ext import commands
-
-WORKSPACE_COMMAND_CHANNEL_ID = 1488247610346045520  # workspace creation channel ID
-WORKSPACE_CATEGORY_ID = 1488245643502686439         # category ID where workspaces are created
+WORKSPACE_COMMAND_CHANNEL_ID = 1488247610346045520
+WORKSPACE_CATEGORY_ID = 1488245643502686439
 ALLOWED_ROLE_NAME = "Listing Staff"
+
 
 @bot.command()
 async def workspace(ctx):
-    # Only allow command in the workspace creation channel
+
+    # 🔥 Only allow command in workspace channel
     if ctx.channel.id != WORKSPACE_COMMAND_CHANNEL_ID:
-        await ctx.send("You can only use this command in the workspace creation channel.")
+
+        msg = await ctx.send(
+            "You can only use this command in the workspace creation channel."
+        )
+
+        await msg.delete(delay=3)
+
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
         return
 
-    # Role check
-    allowed_role = discord.utils.get(ctx.guild.roles, name=ALLOWED_ROLE_NAME)
+    # 🔥 Role check
+    allowed_role = discord.utils.get(
+        ctx.guild.roles,
+        name=ALLOWED_ROLE_NAME
+    )
+
     if allowed_role is None:
-        await ctx.send("The required role was not found. Please check the role name.")
+
+        msg = await ctx.send(
+            "The required role was not found."
+        )
+
+        await msg.delete(delay=3)
+
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
         return
 
+    # 🔥 User doesn't have role
     if allowed_role not in ctx.author.roles:
-        await ctx.send("You cannot use this command. This is only for Listing Staff.")
+
+        msg = await ctx.send(
+            "You cannot use this command. This is only for Listing Staff."
+        )
+
+        await msg.delete(delay=3)
+
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
         return
 
     guild = ctx.guild
     user = ctx.author
 
-    # Get category
-    category = guild.get_channel(WORKSPACE_CATEGORY_ID)
-    if category is None or not isinstance(category, discord.CategoryChannel):
-        await ctx.send("Workspace category not found. Check the category ID.")
+    # 🔥 Get category
+    category = guild.get_channel(
+        WORKSPACE_CATEGORY_ID
+    )
+
+    if category is None or not isinstance(
+        category,
+        discord.CategoryChannel
+    ):
+
+        msg = await ctx.send(
+            "Workspace category not found."
+        )
+
+        await msg.delete(delay=3)
+
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
         return
 
-    # Prevent duplicate workspace
+    # 🔥 Prevent duplicate workspace
     for ch in category.text_channels:
+
         if ch.topic == f"workspace_owner:{user.id}":
-            await ctx.send(f"You already have a workspace: {ch.mention}")
+
+            msg = await ctx.send(
+                f"You already have a workspace: {ch.mention}"
+            )
+
+            await msg.delete(delay=3)
+
+            try:
+                await ctx.message.delete()
+            except:
+                pass
+
             return
 
-    # Safe channel name
-    safe_name = "".join(c.lower() for c in user.display_name if c.isalnum() or c == " ").replace(" ", "-")
+    # 🔥 Safe channel name
+    safe_name = "".join(
+        c.lower()
+        for c in user.display_name
+        if c.isalnum() or c == " "
+    ).replace(" ", "-")
+
     if not safe_name:
         safe_name = f"user-{user.id}"
 
+    # 🔥 Channel permissions
     overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        user: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True
-        ),
-        guild.owner: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-            manage_channels=True
-        ),
-        guild.me: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-            manage_channels=True
-        )
+
+        guild.default_role:
+            discord.PermissionOverwrite(
+                view_channel=False
+            ),
+
+        user:
+            discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            ),
+
+        guild.owner:
+            discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True
+            ),
+
+        guild.me:
+            discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True
+            )
     }
 
+    # 🔥 Create workspace
     channel = await guild.create_text_channel(
+
         name=f"ws-{safe_name}",
+
         category=category,
+
         overwrites=overwrites,
+
         topic=f"workspace_owner:{user.id}",
+
         reason=f"Workspace created for {user}"
     )
 
+    # 🔥 Welcome message inside workspace
     await channel.send(
         f"Welcome {user.mention}!\n"
         "This is your private workspace.\n"
         "Only you, the owner, and the bot can access this channel."
     )
 
-    msg = await ctx.send(f"✅ Your workspace has been created: {channel.mention}")
+    # 🔥 Success message
+    msg = await ctx.send(
+        f"✅ Your workspace has been created: {channel.mention}"
+    )
 
+    # 🔥 Delete BOTH messages
     try:
         await ctx.message.delete()
     except:
         pass
 
     await msg.delete(delay=1)
+
+from datetime import datetime
+from discord.ext import commands
+from discord.ui import View, Button
+import discord
+
+# 🔥 CONFIG
+LISTING_BOARD_CHANNEL_ID = 1488409847798956103
+PAYMENT_CHANNEL_ID = 1501548519469879416
+LISTING_STAFF_ROLE = "Listing Staff"
+
+# 🔥 STORAGE
+listing_storage = {}
+
+# 🔥 ACTIVE CLAIM TRACKER
+user_claims = {}
+
+# 🔥 MAX ACTIVE CLAIMS
+MAX_ACTIVE_CLAIMS = 2
+
+# 🔥 SKU COUNTER
+sku_counter = 1000
+
+
+# 🔥 COUNT REMAINING LISTINGS
+def get_remaining_listings():
+    return sum(
+        1 for listing in listing_storage.values()
+        if not listing["claimed"]
+    )
+
+
+# 🔥 PAYMENT STATUS BUTTON
+class PaymentStatusView(View):
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Paid",
+        style=discord.ButtonStyle.green,
+        emoji="💸"
+    )
+    async def paid_button(
+        self,
+        interaction: discord.Interaction,
+        button: Button
+    ):
+
+        embed = interaction.message.embeds[0]
+
+        updated_embed = discord.Embed(
+            title=embed.title,
+            color=discord.Color.green()
+        )
+
+        # 🔥 Keep existing fields
+        for field in embed.fields:
+
+            if field.name == "Status":
+
+                updated_embed.add_field(
+                    name="Status",
+                    value="💸 Paid",
+                    inline=False
+                )
+
+            else:
+
+                updated_embed.add_field(
+                    name=field.name,
+                    value=field.value,
+                    inline=False
+                )
+
+        updated_embed.set_footer(
+            text="Ebay Warehouse Payment System"
+        )
+
+        # 🔥 Remove button after paid
+        await interaction.message.edit(
+            embed=updated_embed,
+            view=None
+        )
+
+        await interaction.response.send_message(
+            "✅ Marked as paid.",
+            ephemeral=True
+        )
+
+
+# 🔥 COMPLETE BUTTON
+class CompleteListingView(View):
+
+    def __init__(self, listing_message_id):
+        super().__init__(timeout=None)
+        self.listing_message_id = listing_message_id
+
+    @discord.ui.button(
+        label="Done",
+        style=discord.ButtonStyle.green,
+        emoji="✅"
+    )
+    async def complete_button(
+        self,
+        interaction: discord.Interaction,
+        button: Button
+    ):
+
+        listing_data = listing_storage.get(
+            self.listing_message_id
+        )
+
+        if listing_data is None:
+            await interaction.response.send_message(
+                "Listing not found.",
+                ephemeral=True
+            )
+            return
+
+        # 🔒 Only claimer can complete
+        if listing_data["claimer"] != interaction.user.id:
+            await interaction.response.send_message(
+                "You cannot complete this listing.",
+                ephemeral=True
+            )
+            return
+
+        # 🔒 Already completed
+        if listing_data["completed"]:
+            await interaction.response.send_message(
+                "Listing already completed.",
+                ephemeral=True
+            )
+            return
+
+        # 🔥 Mark completed
+        listing_data["completed"] = True
+
+        # 🔥 Free claim slot
+        user_claims[interaction.user.id] -= 1
+
+        # 🔥 PAYMENT CHANNEL
+        payment_channel = bot.get_channel(
+            PAYMENT_CHANNEL_ID
+        )
+
+        if payment_channel:
+
+            payment_embed = discord.Embed(
+                title="📦 Listing Payment Status",
+                color=discord.Color.orange()
+            )
+
+            payment_embed.add_field(
+                name="SKU",
+                value=str(listing_data["sku"]),
+                inline=False
+            )
+
+            payment_embed.add_field(
+                name="Claimed By",
+                value=interaction.user.mention,
+                inline=False
+            )
+
+            payment_embed.add_field(
+                name="Status",
+                value="⏳ Unpaid",
+                inline=False
+            )
+
+            payment_embed.set_footer(
+                text="Ebay Warehouse Payment System"
+            )
+
+            payment_view = PaymentStatusView()
+
+            await payment_channel.send(
+                embed=payment_embed,
+                view=payment_view
+            )
+
+        # 🔥 COMPLETED EMBED
+        completed_embed = discord.Embed(
+            title="✅ Listing Completed",
+            description=(
+                f"SKU: {listing_data['sku']}\n"
+                f"Completed by {interaction.user.mention}"
+            ),
+            color=discord.Color.green()
+        )
+
+        completed_embed.set_footer(
+            text="Ebay Warehouse Listing System"
+        )
+
+        await interaction.message.edit(
+            embed=completed_embed,
+            view=None
+        )
+
+        await interaction.response.send_message(
+            "✅ Listing marked as completed.",
+            ephemeral=True
+        )
+
+
+# 🔥 NEW LISTING COMMAND
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def newlisting(ctx, link):
+
+    global sku_counter
+
+    channel = bot.get_channel(
+        LISTING_BOARD_CHANNEL_ID
+    )
+
+    if channel is None:
+        await ctx.send(
+            "Listing board channel not found."
+        )
+        return
+
+    role = discord.utils.get(
+        ctx.guild.roles,
+        name=LISTING_STAFF_ROLE
+    )
+
+    if role is None:
+        await ctx.send(
+            "Listing Staff role not found."
+        )
+        return
+
+    remaining = get_remaining_listings() + 1
+
+    embed = discord.Embed(
+        title="📦 New Listing Available",
+        description=(
+            "React with ✅ to claim this listing job.\n\n"
+            f"📊 Remaining Listings: {remaining}"
+        ),
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="SKU",
+        value=str(sku_counter),
+        inline=False
+    )
+
+    embed.set_footer(
+        text="Ebay Warehouse Listing System"
+    )
+
+    message = await channel.send(
+        content=f"{role.mention}",
+        embed=embed
+    )
+
+    await message.add_reaction("✅")
+
+    # 🔥 STORE DATA
+    listing_storage[message.id] = {
+        "sku": sku_counter,
+        "link": link,
+        "claimed": False,
+        "completed": False
+    }
+
+    sku_counter += 1
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+
+# 🔥 CLAIM SYSTEM
+@bot.event
+async def on_reaction_add(reaction, user):
+
+    if user.bot:
+        return
+
+    if str(reaction.emoji) != "✅":
+        return
+
+    message = reaction.message
+
+    if message.id not in listing_storage:
+        return
+
+    listing_data = listing_storage[message.id]
+
+    if listing_data["claimed"]:
+        return
+
+    guild = message.guild
+
+    role = discord.utils.get(
+        guild.roles,
+        name=LISTING_STAFF_ROLE
+    )
+
+    if role not in user.roles:
+        return
+
+    # 🔥 CLAIM LIMIT
+    current_claims = user_claims.get(
+        user.id,
+        0
+    )
+
+    if current_claims >= MAX_ACTIVE_CLAIMS:
+
+        await message.channel.send(
+            f"{user.mention} You already have the maximum of {MAX_ACTIVE_CLAIMS} active listings."
+        )
+
+        return
+
+    # 🔥 MARK CLAIMED
+    listing_data["claimed"] = True
+    listing_data["claimer"] = user.id
+
+    # 🔥 INCREASE CLAIM COUNT
+    user_claims[user.id] = current_claims + 1
+
+    # 🔥 FIND WORKSPACE
+    workspace_channel = None
+
+    for channel in guild.text_channels:
+
+        if channel.topic == f"workspace_owner:{user.id}":
+            workspace_channel = channel
+            break
+
+    if workspace_channel is None:
+
+        await message.channel.send(
+            f"{user.mention} You do not have a workspace."
+        )
+
+        return
+
+    # 🔥 WORKSPACE EMBED
+    workspace_embed = discord.Embed(
+        title="📦 New Claimed Listing",
+        color=discord.Color.blue()
+    )
+
+    workspace_embed.add_field(
+        name="SKU",
+        value=str(listing_data["sku"]),
+        inline=False
+    )
+
+    workspace_embed.add_field(
+        name="Drive Folder",
+        value=listing_data["link"],
+        inline=False
+    )
+
+    workspace_embed.set_footer(
+        text="Ebay Warehouse Listing System"
+    )
+
+    await workspace_channel.send(
+        embed=workspace_embed,
+        view=CompleteListingView(message.id)
+    )
+
+    # 🔥 REMAINING COUNTER
+    remaining = get_remaining_listings()
+
+    claimed_embed = discord.Embed(
+        title="📦 Listing Claimed",
+        description=(
+            f"Claimed by {user.mention}\n\n"
+            f"📊 Remaining Listings: {remaining}"
+        ),
+        color=discord.Color.green()
+    )
+
+    claimed_embed.add_field(
+        name="SKU",
+        value=str(listing_data["sku"]),
+        inline=False
+    )
+
+    claimed_embed.set_footer(
+        text="Ebay Warehouse Listing System"
+    )
+
+    await message.edit(
+        embed=claimed_embed
+    )
+
+    try:
+        await message.clear_reactions()
+    except:
+        pass
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
 
