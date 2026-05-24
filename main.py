@@ -329,7 +329,7 @@ user_claims = {}
 MAX_ACTIVE_CLAIMS = 2
 
 # 🔥 SKU COUNTER
-sku_counter = 1000
+sku_counter = 1016
 
 
 # 🔥 COUNT REMAINING LISTINGS
