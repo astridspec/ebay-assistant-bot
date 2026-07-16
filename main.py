@@ -315,7 +315,7 @@ from discord.ui import View, Button
 import discord
 
 # 🔥 CONFIG
-LISTING_BOARD_CHANNEL_ID = 1488409847798956103
+LISTING_BOARD_CHANNEL_ID = 1527203757182681188
 PAYMENT_CHANNEL_ID = 1501548519469879416
 LISTING_STAFF_ROLE = "Listing Staff"
 
@@ -326,19 +326,23 @@ listing_storage = {}
 user_claims = {}
 
 # 🔥 MAX ACTIVE CLAIMS
-MAX_ACTIVE_CLAIMS = 2
+MAX_ACTIVE_CLAIMS = 1
 
 # 🔥 SKU COUNTER
-sku_counter = 1016
+sku_counter = 1001
+
+# REVIEW SYSTEM
+REVIEW_CHANNEL_ID = 1527203732654129233 # Replace with your Review Channel ID
+
+MODERATOR_ROLE = "Moderator"  # Role allowed to approve/reject
 
 
 # 🔥 COUNT REMAINING LISTINGS
 def get_remaining_listings():
     return sum(
         1 for listing in listing_storage.values()
-        if not listing["claimed"]
+        if not listing["claimed"] and not listing.get("approved", False)
     )
-
 
 # 🔥 PAYMENT STATUS BUTTON
 class PaymentStatusView(View):
@@ -387,17 +391,410 @@ class PaymentStatusView(View):
             text="Ebay Warehouse Payment System"
         )
 
-        # 🔥 Remove button after paid
+        # 🔥 Remove button after payment
         await interaction.message.edit(
             embed=updated_embed,
             view=None
         )
 
         await interaction.response.send_message(
-            "✅ Marked as paid.",
+            "✅ Payment marked as paid.",
             ephemeral=True
         )
 
+# 🔥 APPROVE / REJECT REVIEW
+class ApproveListingView(View):
+
+    def __init__(self, listing_message_id):
+        super().__init__(timeout=None)
+        self.listing_message_id = listing_message_id
+
+    @discord.ui.button(
+        label="Approve",
+        style=discord.ButtonStyle.green,
+        emoji="✅"
+    )
+    async def approve_button(
+        self,
+        interaction: discord.Interaction,
+        button: Button
+    ):
+
+        # 🔒 Moderator role check
+        role = discord.utils.get(
+            interaction.guild.roles,
+            name=MODERATOR_ROLE
+        )
+
+        if role not in interaction.user.roles:
+            await interaction.response.send_message(
+                "You don't have permission to approve listings.",
+                ephemeral=True
+            )
+            return
+
+        listing_data = listing_storage.get(self.listing_message_id)
+
+        if listing_data is None:
+            await interaction.response.send_message(
+                "Listing not found.",
+                ephemeral=True
+            )
+            return
+
+        if listing_data["approved"]:
+            await interaction.response.send_message(
+                "This listing has already been approved.",
+                ephemeral=True
+            )
+            return
+
+        # 🔥 Mark approved
+        listing_data["approved"] = True
+        listing_data["submitted"] = False
+        listing_data["rejected"] = False
+        listing_data["completed"] = True
+        listing_data["reviewed_by"] = interaction.user.id
+        listing_data["claimed"] = False
+
+        # 🔥 Unlock employee
+        claimer = listing_data["claimer"]
+
+        if claimer in user_claims:
+            user_claims[claimer] = max(
+                0,
+                user_claims[claimer] - 1
+            )
+
+        # 🔥 Update review message
+        embed = discord.Embed(
+            title="✅ Listing Approved",
+            color=discord.Color.green()
+        )
+
+        embed.add_field(
+            name="SKU",
+            value=str(listing_data["sku"]),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Approved By",
+            value=interaction.user.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Status",
+            value="✅ Approved",
+            inline=False
+        )
+
+        await interaction.message.edit(
+            embed=embed,
+            view=None
+        )
+
+        # 🔥 Update employee workspace
+        workspace_channel = bot.get_channel(
+            listing_data["workspace_channel"]
+        )
+
+        if workspace_channel:
+
+            try:
+                workspace_message = await workspace_channel.fetch_message(
+                    listing_data["workspace_message"]
+                )
+
+                approved_embed = discord.Embed(
+                    title="✅ Listing Approved",
+                    description=(
+                        f"SKU: {listing_data['sku']}\n\n"
+                        "Your listing has been approved.\n"
+                        "You may now claim another listing."
+                    ),
+                    color=discord.Color.green()
+                )
+
+                approved_embed.set_footer(
+                    text="Ebay Warehouse Listing System"
+                )
+
+                await workspace_message.edit(
+                    embed=approved_embed,
+                    view=None
+                )
+
+            except Exception as e:
+                print(e)
+
+        # 🔥 PAYMENT CHANNEL
+        payment_channel = bot.get_channel(
+            PAYMENT_CHANNEL_ID
+        )
+
+        if payment_channel:
+
+            payment_embed = discord.Embed(
+                title="📦 Listing Payment Status",
+                color=discord.Color.orange()
+            )
+
+            payment_embed.add_field(
+                name="SKU",
+                value=str(listing_data["sku"]),
+                inline=False
+            )
+
+            payment_embed.add_field(
+                name="Claimed By",
+                value=f"<@{listing_data['claimer']}>",
+                inline=False
+            )
+
+            payment_embed.add_field(
+                name="Status",
+                value="⏳ Unpaid",
+                inline=False
+            )
+
+            payment_embed.set_footer(
+                text="Ebay Warehouse Payment System"
+            )
+
+            payment_view = PaymentStatusView()
+
+            await payment_channel.send(
+                embed=payment_embed,
+                view=payment_view
+            )
+
+        # 🔥 Notify employee
+        claimer = interaction.guild.get_member(
+            listing_data["claimer"]
+        )
+
+        if claimer:
+            try:
+                await claimer.send(
+                    f"✅ Your listing (SKU {listing_data['sku']}) has been approved.\n"
+                    "You may now claim another listing."
+                )
+            except:
+                pass
+
+        await interaction.response.send_message(
+            "✅ Listing approved.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Reject",
+        style=discord.ButtonStyle.red,
+        emoji="❌"
+    )
+    async def reject_button(
+        self,
+        interaction: discord.Interaction,
+        button: Button
+    ):
+
+        # 🔒 Moderator role check
+        role = discord.utils.get(
+            interaction.guild.roles,
+            name=MODERATOR_ROLE
+        )
+
+        if role not in interaction.user.roles:
+            await interaction.response.send_message(
+                "You don't have permission to reject listings.",
+                ephemeral=True
+            )
+            return
+
+        listing_data = listing_storage.get(
+            self.listing_message_id
+        )
+
+        if listing_data is None:
+            await interaction.response.send_message(
+                "Listing not found.",
+                ephemeral=True
+            )
+            return
+
+        listing_data["submitted"] = False
+        listing_data["approved"] = False
+        listing_data["rejected"] = True
+        listing_data["reviewed_by"] = interaction.user.id
+
+        embed = discord.Embed(
+            title="❌ Listing Rejected",
+            color=discord.Color.red()
+        )
+
+        embed.add_field(
+            name="SKU",
+            value=str(listing_data["sku"]),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Rejected By",
+            value=interaction.user.mention,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Status",
+            value="🔴 Rejected",
+            inline=False
+        )
+
+        await interaction.message.edit(
+            embed=embed,
+            view=None
+        )
+
+        # 🔥 Update employee workspace
+        workspace_channel = bot.get_channel(
+            listing_data["workspace_channel"]
+        )
+
+        if workspace_channel:
+
+            try:
+                workspace_message = await workspace_channel.fetch_message(
+                    listing_data["workspace_message"]
+                )
+
+                rejected_embed = discord.Embed(
+                    title="❌ Listing Rejected",
+                    description=(
+                        f"SKU: {listing_data['sku']}\n\n"
+                        "Your work needs corrections.\n"
+                        "After fixing it, click **Done** again."
+                    ),
+                    color=discord.Color.red()
+                )
+
+                rejected_embed.set_footer(
+                    text="Ebay Warehouse Listing System"
+                )
+
+                await workspace_message.edit(
+                    embed=rejected_embed,
+                    view=CompleteListingView(self.listing_message_id)
+                )
+
+            except Exception as e:
+                print(e)
+
+        # 🔥 Notify employee
+        claimer = interaction.guild.get_member(
+            listing_data["claimer"]
+        )
+
+        if claimer:
+            try:
+                await claimer.send(
+                    f"❌ Your listing (SKU {listing_data['sku']}) was rejected.\n"
+                    "Please fix the issues and press **Done** again when finished."
+                )
+            except:
+                pass
+
+        await interaction.response.send_message(
+            "❌ Listing rejected.\nThe employee must fix the listing and submit it again.",
+            ephemeral=True
+        )
+
+# 🔥 NEW LISTING COMMAND
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def newlisting(ctx, link):
+
+    global sku_counter
+
+    channel = bot.get_channel(
+        LISTING_BOARD_CHANNEL_ID
+    )
+
+    if channel is None:
+        await ctx.send(
+            "Listing board channel not found."
+        )
+        return
+
+    role = discord.utils.get(
+        ctx.guild.roles,
+        name=LISTING_STAFF_ROLE
+    )
+
+    if role is None:
+        await ctx.send(
+            "Listing Staff role not found."
+        )
+        return
+
+    remaining = get_remaining_listings() + 1
+
+    embed = discord.Embed(
+        title="📦 New Listing Available",
+        description=(
+            "React with ✅ to claim this listing.\n\n"
+            f"📊 Remaining Listings: {remaining}"
+        ),
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="SKU",
+        value=str(sku_counter),
+        inline=False
+    )
+
+    embed.set_footer(
+        text="Ebay Warehouse Listing System"
+    )
+
+    message = await channel.send(
+        content=role.mention,
+        embed=embed
+    )
+
+    await message.add_reaction("✅")
+
+    # 🔥 STORE LISTING
+    listing_storage[message.id] = {
+        "sku": sku_counter,
+        "link": link,
+
+        "claimed": False,
+        "completed": False,
+
+        "claimer": None,
+        "claimed_at": None,
+
+        "submitted": False,
+        "approved": False,
+        "rejected": False,
+
+        "review_message": None,
+        "workspace_message": None,
+        "workspace_channel": None,
+
+        "reject_reason": None,
+        "reviewed_by": None
+    }
+
+    sku_counter += 1
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 # 🔥 COMPLETE BUTTON
 class CompleteListingView(View):
@@ -436,157 +833,86 @@ class CompleteListingView(View):
             )
             return
 
-        # 🔒 Already completed
-        if listing_data["completed"]:
+        # 🔒 Already waiting for review
+        if listing_data.get("submitted") and not listing_data.get("rejected"):
             await interaction.response.send_message(
-                "Listing already completed.",
+                "This listing is already waiting for moderator review.",
                 ephemeral=True
             )
             return
 
-        # 🔥 Mark completed
-        listing_data["completed"] = True
+        # 🔥 Mark as submitted for review
+        listing_data["submitted"] = True
+        listing_data["claimer"] = interaction.user.id
+        listing_data["approved"] = False
+        listing_data["rejected"] = False
 
-        # 🔥 Free claim slot
-        user_claims[interaction.user.id] -= 1
+        # 🔥 Send to review channel
+        review_channel = bot.get_channel(REVIEW_CHANNEL_ID)
 
-        # 🔥 PAYMENT CHANNEL
-        payment_channel = bot.get_channel(
-            PAYMENT_CHANNEL_ID
-        )
+        if review_channel:
 
-        if payment_channel:
-
-            payment_embed = discord.Embed(
-                title="📦 Listing Payment Status",
+            embed = discord.Embed(
+                title="📦 Listing Waiting For Review",
                 color=discord.Color.orange()
             )
 
-            payment_embed.add_field(
+            embed.add_field(
                 name="SKU",
                 value=str(listing_data["sku"]),
                 inline=False
             )
 
-            payment_embed.add_field(
-                name="Claimed By",
+            embed.add_field(
+                name="Employee",
                 value=interaction.user.mention,
                 inline=False
             )
 
-            payment_embed.add_field(
-                name="Status",
-                value="⏳ Unpaid",
+            embed.add_field(
+                name="Drive Folder",
+                value=listing_data["link"],
                 inline=False
             )
 
-            payment_embed.set_footer(
-                text="Ebay Warehouse Payment System"
+            embed.add_field(
+                name="Status",
+                value="🟡 Waiting Review",
+                inline=False
             )
 
-            payment_view = PaymentStatusView()
-
-            await payment_channel.send(
-                embed=payment_embed,
-                view=payment_view
+            review_msg = await review_channel.send(
+                embed=embed,
+                view=ApproveListingView(self.listing_message_id)
             )
 
-        # 🔥 COMPLETED EMBED
-        completed_embed = discord.Embed(
-            title="✅ Listing Completed",
+            listing_data["review_message"] = review_msg.id
+
+        # 🔥 Update workspace message
+        submitted_embed = discord.Embed(
+            title="🟡 Listing Submitted",
             description=(
-                f"SKU: {listing_data['sku']}\n"
-                f"Completed by {interaction.user.mention}"
+                f"SKU: {listing_data['sku']}\n\n"
+                "Your work has been submitted.\n"
+                "Please wait for moderator approval."
             ),
-            color=discord.Color.green()
+            color=discord.Color.orange()
         )
 
-        completed_embed.set_footer(
+        submitted_embed.set_footer(
             text="Ebay Warehouse Listing System"
         )
 
         await interaction.message.edit(
-            embed=completed_embed,
+            embed=submitted_embed,
             view=None
         )
 
         await interaction.response.send_message(
-            "✅ Listing marked as completed.",
+            "✅ Your listing has been submitted for review.\n\n"
+            "You cannot claim another listing until it has been approved.",
             ephemeral=True
         )
-
-
-# 🔥 NEW LISTING COMMAND
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def newlisting(ctx, link):
-
-    global sku_counter
-
-    channel = bot.get_channel(
-        LISTING_BOARD_CHANNEL_ID
-    )
-
-    if channel is None:
-        await ctx.send(
-            "Listing board channel not found."
-        )
-        return
-
-    role = discord.utils.get(
-        ctx.guild.roles,
-        name=LISTING_STAFF_ROLE
-    )
-
-    if role is None:
-        await ctx.send(
-            "Listing Staff role not found."
-        )
-        return
-
-    remaining = get_remaining_listings() + 1
-
-    embed = discord.Embed(
-        title="📦 New Listing Available",
-        description=(
-            "React with ✅ to claim this listing job.\n\n"
-            f"📊 Remaining Listings: {remaining}"
-        ),
-        color=discord.Color.blue()
-    )
-
-    embed.add_field(
-        name="SKU",
-        value=str(sku_counter),
-        inline=False
-    )
-
-    embed.set_footer(
-        text="Ebay Warehouse Listing System"
-    )
-
-    message = await channel.send(
-        content=f"{role.mention}",
-        embed=embed
-    )
-
-    await message.add_reaction("✅")
-
-    # 🔥 STORE DATA
-    listing_storage[message.id] = {
-        "sku": sku_counter,
-        "link": link,
-        "claimed": False,
-        "completed": False
-    }
-
-    sku_counter += 1
-
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-
 
 # 🔥 CLAIM SYSTEM
 @bot.event
@@ -604,6 +930,13 @@ async def on_reaction_add(reaction, user):
         return
 
     listing_data = listing_storage[message.id]
+
+    # 🔒 Ignore listings already waiting for review or already approved
+    if (
+            listing_data.get("submitted")
+            and not listing_data.get("rejected")
+    ) or listing_data.get("approved"):
+        return
 
     if listing_data["claimed"]:
         return
@@ -635,6 +968,7 @@ async def on_reaction_add(reaction, user):
     # 🔥 MARK CLAIMED
     listing_data["claimed"] = True
     listing_data["claimer"] = user.id
+    listing_data["claimed_at"] = datetime.now()
 
     # 🔥 INCREASE CLAIM COUNT
     user_claims[user.id] = current_claims + 1
@@ -674,14 +1008,23 @@ async def on_reaction_add(reaction, user):
         inline=False
     )
 
+    workspace_embed.add_field(
+        name="Status",
+        value="🔵 Claimed",
+        inline=False
+    )
+
     workspace_embed.set_footer(
         text="Ebay Warehouse Listing System"
     )
 
-    await workspace_channel.send(
+    workspace_msg = await workspace_channel.send(
         embed=workspace_embed,
         view=CompleteListingView(message.id)
     )
+
+    listing_data["workspace_message"] = workspace_msg.id
+    listing_data["workspace_channel"] = workspace_channel.id
 
     # 🔥 REMAINING COUNTER
     remaining = get_remaining_listings()
