@@ -3,6 +3,9 @@ from discord.ext import commands
 import logging
 from dotenv import load_dotenv
 import os
+import asyncio
+import gspread
+from google.oauth2.service_account import Credentials
 
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
@@ -13,6 +16,134 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+# ==============================
+# GOOGLE SHEETS CONFIG
+# ==============================
+
+GOOGLE_CREDENTIALS_FILE = "google_credentials.json"
+GOOGLE_SHEET_ID = "1_EKLhJhmbGvmPYbhPHsd9b6HjMendAV8w5pVVrurr_E"
+GOOGLE_WORKSHEET_NAME = "Listings"
+
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+google_credentials = Credentials.from_service_account_file(
+    GOOGLE_CREDENTIALS_FILE,
+    scopes=GOOGLE_SCOPES,
+)
+
+google_client = gspread.authorize(google_credentials)
+spreadsheet = google_client.open_by_key(GOOGLE_SHEET_ID)
+worksheet = spreadsheet.worksheet(GOOGLE_WORKSHEET_NAME)
+
+
+async def add_listing_to_sheet(sku, link):
+    """Add a newly-created listing to Google Sheets."""
+    def _add():
+        worksheet.append_row(
+            [str(sku), link, "", "", "", "", "Available", ""],
+            value_input_option="USER_ENTERED",
+        )
+
+    try:
+        await asyncio.to_thread(_add)
+        print(f"✅ Google Sheets: SKU {sku} added.")
+    except Exception as e:
+        print(f"❌ Google Sheets: failed to add SKU {sku}: {e}")
+
+
+async def update_listing_sheet(
+    sku,
+    employee=None,
+    claimed_at=None,
+    submitted_at=None,
+    reviewed_by=None,
+    status=None,
+    paid=None,
+):
+    """Find a listing by SKU and update only the supplied columns."""
+    def _update():
+        cell = worksheet.find(str(sku), in_column=1)
+        if cell is None:
+            raise ValueError(f"SKU {sku} was not found in Google Sheets.")
+
+        row = cell.row
+        updates = []
+
+        if employee is not None:
+            updates.append((row, 3, str(employee)))
+
+        if claimed_at is not None:
+            updates.append((row, 4, str(claimed_at)))
+
+        if submitted_at is not None:
+            updates.append((row, 5, str(submitted_at)))
+
+        if reviewed_by is not None:
+            updates.append((row, 6, str(reviewed_by)))
+
+        if status is not None:
+            updates.append((row, 7, str(status)))
+
+        if paid is not None:
+            updates.append((row, 8, str(paid)))
+
+        for target_row, target_col, value in updates:
+            worksheet.update_cell(target_row, target_col, value)
+
+    try:
+        await asyncio.to_thread(_update)
+        print(f"✅ Google Sheets: SKU {sku} updated.")
+    except Exception as e:
+        print(f"❌ Google Sheets: failed to update SKU {sku}: {e}")
+
+
+def get_next_sku_from_sheet():
+    """Return the next SKU based on the highest numeric SKU already in column A."""
+    try:
+        values = worksheet.col_values(1)
+        numeric_skus = []
+
+        for value in values[1:]:  # skip header
+            try:
+                numeric_skus.append(int(str(value).strip()))
+            except (ValueError, TypeError):
+                pass
+
+        return max(numeric_skus, default=999) + 1
+    except Exception as e:
+        print(f"⚠️ Google Sheets: could not determine next SKU: {e}")
+        return 1000
+
+
+print("✅ Google Sheets connected successfully!")
+
+# Verify the expected worksheet headers before the bot starts.
+EXPECTED_HEADERS = [
+    "SKU",
+    "Drive Link",
+    "Employee",
+    "Claimed At",
+    "Submitted At",
+    "Reviewed By",
+    "Status",
+    "Paid",
+]
+
+try:
+    current_headers = worksheet.row_values(1)
+    if current_headers[:8] != EXPECTED_HEADERS:
+        print("⚠️ Google Sheets header mismatch.")
+        print(f"   Expected: {EXPECTED_HEADERS}")
+        print(f"   Found:    {current_headers[:8]}")
+    else:
+        print("✅ Google Sheets headers verified.")
+except Exception as e:
+    print(f"⚠️ Could not verify Google Sheets headers: {e}")
+
 
 access_role = "Verified"
 
@@ -315,8 +446,8 @@ from discord.ui import View, Button
 import discord
 
 # 🔥 CONFIG
-LISTING_BOARD_CHANNEL_ID = 1527253933536313384
-PAYMENT_CHANNEL_ID = 1527217771270897725
+LISTING_BOARD_CHANNEL_ID = 1552286157218521169
+PAYMENT_CHANNEL_ID = 1552286961266335744
 LISTING_STAFF_ROLE = "Listing Staff"
 
 # 🔥 STORAGE
@@ -329,10 +460,10 @@ user_claims = {}
 MAX_ACTIVE_CLAIMS = 1
 
 # 🔥 SKU COUNTER
-sku_counter = 1001
+sku_counter = get_next_sku_from_sheet()
 
 # REVIEW SYSTEM
-REVIEW_CHANNEL_ID = 1527203732654129233 # Replace with your Review Channel ID
+REVIEW_CHANNEL_ID = 1552287487119073322 # Replace with your Review Channel ID
 
 MODERATOR_ROLE = "Moderator"  # Role allowed to approve/reject
 
@@ -390,6 +521,20 @@ class PaymentStatusView(View):
         updated_embed.set_footer(
             text="Ebay Warehouse Payment System"
         )
+
+        # 🔥 Update Google Sheets payment status
+        sku = None
+        for field in embed.fields:
+            if field.name == "SKU":
+                sku = field.value
+                break
+
+        if sku is not None:
+            await update_listing_sheet(
+                sku=sku,
+                paid="Paid",
+                status="Paid"
+            )
 
         # 🔥 Remove button after payment
         await interaction.message.edit(
@@ -456,6 +601,13 @@ class ApproveListingView(View):
         listing_data["completed"] = True
         listing_data["reviewed_by"] = interaction.user.id
         listing_data["claimed"] = False
+
+        # 🔥 UPDATE GOOGLE SHEETS
+        await update_listing_sheet(
+            sku=listing_data["sku"],
+            reviewed_by=interaction.user.display_name,
+            status="Approved",
+        )
 
         # 🔥 Unlock employee
         claimer = listing_data["claimer"]
@@ -629,6 +781,13 @@ class ApproveListingView(View):
         listing_data["rejected"] = True
         listing_data["reviewed_by"] = interaction.user.id
 
+        # 🔥 UPDATE GOOGLE SHEETS
+        await update_listing_sheet(
+            sku=listing_data["sku"],
+            reviewed_by=interaction.user.display_name,
+            status="Rejected",
+        )
+
         embed = discord.Embed(
             title="❌ Listing Rejected",
             color=discord.Color.red()
@@ -776,6 +935,7 @@ async def newlisting(ctx, link):
 
         "claimer": None,
         "claimed_at": None,
+        "submitted_at": None,
 
         "submitted": False,
         "approved": False,
@@ -788,6 +948,12 @@ async def newlisting(ctx, link):
         "reject_reason": None,
         "reviewed_by": None
     }
+
+    # 🔥 ADD LISTING TO GOOGLE SHEETS
+    await add_listing_to_sheet(
+        sku=listing_storage[message.id]["sku"],
+        link=listing_storage[message.id]["link"],
+    )
 
     sku_counter += 1
 
@@ -846,6 +1012,14 @@ class CompleteListingView(View):
         listing_data["claimer"] = interaction.user.id
         listing_data["approved"] = False
         listing_data["rejected"] = False
+        listing_data["submitted_at"] = datetime.now()
+
+        # 🔥 UPDATE GOOGLE SHEETS
+        await update_listing_sheet(
+            sku=listing_data["sku"],
+            submitted_at=listing_data["submitted_at"].strftime("%Y-%m-%d %H:%M:%S"),
+            status="Waiting Review",
+        )
 
         # 🔥 Send to review channel
         review_channel = bot.get_channel(REVIEW_CHANNEL_ID)
@@ -970,6 +1144,14 @@ async def on_reaction_add(reaction, user):
     listing_data["claimer"] = user.id
     listing_data["claimed_at"] = datetime.now()
 
+    # 🔥 UPDATE GOOGLE SHEETS
+    await update_listing_sheet(
+        sku=listing_data["sku"],
+        employee=user.display_name,
+        claimed_at=listing_data["claimed_at"].strftime("%Y-%m-%d %H:%M:%S"),
+        status="Claimed",
+    )
+
     # 🔥 INCREASE CLAIM COUNT
     user_claims[user.id] = current_claims + 1
 
@@ -1058,4 +1240,5 @@ async def on_reaction_add(reaction, user):
         pass
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+
 
