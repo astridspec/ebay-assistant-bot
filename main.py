@@ -1263,6 +1263,3 @@ async def on_reaction_add(reaction, user):
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
 
-
-
-```
