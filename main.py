@@ -1,9 +1,11 @@
+```
 import discord
 from discord.ext import commands
 import logging
 from dotenv import load_dotenv
 import os
 import asyncio
+import json
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -30,10 +32,30 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-google_credentials = Credentials.from_service_account_file(
-    GOOGLE_CREDENTIALS_FILE,
-    scopes=GOOGLE_SCOPES,
-)
+# Use Railway's secure environment variable when deployed.
+# When running locally, fall back to google_credentials.json.
+google_credentials_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+
+if google_credentials_json:
+    try:
+        google_credentials_info = json.loads(google_credentials_json)
+        google_credentials = Credentials.from_service_account_info(
+            google_credentials_info,
+            scopes=GOOGLE_SCOPES,
+        )
+        print("✅ Google credentials loaded from GOOGLE_CREDENTIALS_JSON.")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            "GOOGLE_CREDENTIALS_JSON is not valid JSON. "
+            "Check the Railway variable and make sure the complete "
+            "google_credentials.json contents were pasted."
+        ) from e
+else:
+    google_credentials = Credentials.from_service_account_file(
+        GOOGLE_CREDENTIALS_FILE,
+        scopes=GOOGLE_SCOPES,
+    )
+    print("✅ Google credentials loaded from local google_credentials.json.")
 
 google_client = gspread.authorize(google_credentials)
 spreadsheet = google_client.open_by_key(GOOGLE_SHEET_ID)
@@ -1242,3 +1264,5 @@ async def on_reaction_add(reaction, user):
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
 
 
+
+```
